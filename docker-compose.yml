@@ -1,0 +1,33 @@
+# Red can ONLY reach the gateway. The model can ONLY be reached by the gateway.
+# Blue runs INSIDE the gateway as a verdict-only sealed unit, so it has no network of its own.
+networks:
+  red_net:   { internal: true }       # no internet
+  model_net: { internal: true }
+services:
+  gateway:
+    build: .
+    environment: { MODEL_BACKEND: "ollama", OLLAMA_URL: "http://model:11434", OLLAMA_MODEL: "qwen2.5:1.5b", SALTING: "1", QUANTIZE_MS: "3000" }
+    networks: [red_net, model_net, default]      # the only bridge between worlds
+    ports: ["8000:8000"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+  model:
+    image: ollama/ollama
+    volumes: ["ollama:/root/.ollama"]
+    networks: [model_net]
+    cpus: 2
+    mem_limit: 4g
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+  red:
+    build: .
+    command: ["python", "red_runner.py", "http://gateway:8000"]
+    networks: [red_net]
+    cpus: 0.5
+    mem_limit: 512m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    depends_on: [gateway]
+    profiles: ["attack"]
+volumes: { ollama: {} }

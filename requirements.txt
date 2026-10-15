@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pydantic
+cryptography
+scikit-learn
+numpy
+httpx
