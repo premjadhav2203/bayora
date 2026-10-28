@@ -45,4 +45,11 @@ Terminal 2:               cd frontend && npm install && npm run dev      -> open
 - The timing-attack chart is measured live when the page loads (about 45 s)
 - Set DEMO_MODE=0 to disable the dashboard API (tamper/leak buttons) outside demos
 - If the gateway is not on localhost:8000: GATEWAY_URL=http://host:port npm run dev
-# bayora
+
+## v4 additions
+- Jitter / resource-interference check in the integrity score (cert fields: latency_cv, bucket_overflows, jitter_flag)
+- Defense benchmark: 40-prompt public corpus (bayora/payloads.py), two defenses, detection / false-alarm / F1 per category
+- Offline certificate verifier:  python verify_cert.py cert.json --pubkey audit_key_pub.pem --db audit.db
+  (always pass --pubkey: the key inside a certificate is self-reported)
+- Dashboard: noisy-neighbour toggle, defense benchmark panel, Verify / Forge certificate buttons
+- "Noisy neighbour" is SIMULATED on the mock model; with Docker, use a real stress-ng container instead

@@ -1,11 +1,11 @@
-import { Bug, Play, RotateCcw, ScanSearch, Hammer, Loader2 } from "lucide-react";
+import { Bug, Play, RotateCcw, ScanSearch, Hammer, Loader2, Cpu } from "lucide-react";
 
 type P = {
-  running: boolean; leak: boolean; setLeak: (b: boolean) => void; tampered: boolean;
-  onRun: () => void; onTamper: () => void; onRestore: () => void; onVerify: () => void; error: string;
+  running: boolean; leak: boolean; setLeak: (b: boolean) => void; noisy: boolean; setNoisy: (b: boolean) => void;
+  tampered: boolean; onRun: () => void; onTamper: () => void; onRestore: () => void; onVerify: () => void; error: string;
 };
 
-export default function Controls({ running, leak, setLeak, tampered, onRun, onTamper, onRestore, onVerify, error }: P) {
+export default function Controls({ running, leak, setLeak, noisy, setNoisy, tampered, onRun, onTamper, onRestore, onVerify, error }: P) {
   const btn = "flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition disabled:opacity-40";
   return (
     <section className="panel p-4">
@@ -16,7 +16,11 @@ export default function Controls({ running, leak, setLeak, tampered, onRun, onTa
         </button>
         <label className={`${btn} cursor-pointer select-none border-line ${leak ? "border-warn/60 bg-warn/10 text-warn" : "text-slate-300"}`}>
           <input type="checkbox" className="hidden" checked={leak} onChange={(e) => setLeak(e.target.checked)} disabled={running} />
-          <Bug className="h-4 w-4" /> Inject leak (misconfigured /metrics): {leak ? "ON" : "OFF"}
+          <Bug className="h-4 w-4" /> Inject leak: {leak ? "ON" : "OFF"}
+        </label>
+        <label className={`${btn} cursor-pointer select-none border-line ${noisy ? "border-warn/60 bg-warn/10 text-warn" : "text-slate-300"}`}>
+          <input type="checkbox" className="hidden" checked={noisy} onChange={(e) => setNoisy(e.target.checked)} disabled={running} />
+          <Cpu className="h-4 w-4" /> Noisy neighbour (CPU hog): {noisy ? "ON" : "OFF"}
         </label>
         <div className="mx-1 hidden h-8 w-px bg-line md:block" />
         {!tampered ? (

@@ -1,13 +1,14 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { AuditRow, Cert, Hit, Step, TimingState, Verify } from "@/lib/types";
+import { AuditRow, BenchState, Cert, Hit, Step, TimingState, Verify } from "@/lib/types";
 import Header from "@/components/Header";
 import FlowDiagram from "@/components/FlowDiagram";
 import Controls from "@/components/Controls";
 import Timeline from "@/components/Timeline";
 import VerdictFeed from "@/components/VerdictFeed";
-import CertCard from "@/components/CertCard";
+import CertCard, { Verif } from "@/components/CertCard";
+import DefensePanel from "@/components/DefensePanel";
 import TimingPanel from "@/components/TimingPanel";
 import ChainView from "@/components/ChainView";
 import CanaryPanel from "@/components/CanaryPanel";
@@ -27,6 +28,10 @@ export default function Page() {
   const [active, setActive] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [leak, setLeak] = useState(false);
+  const [noisy, setNoisy] = useState(false);
+  const [verif, setVerif] = useState<Verif>(null);
+  const [bench, setBench] = useState<BenchState | null>(null);
+  const [benchBusy, setBenchBusy] = useState(false);
   const [timing, setTiming] = useState<TimingState | null>(null);
   const [error, setError] = useState("");
   const startedTiming = useRef(false);
@@ -54,6 +59,23 @@ export default function Page() {
     return () => { stop = true; clearInterval(iv); };
   }, [timing?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const runBench = useCallback(async () => {
+    setBenchBusy(true);
+    try { setBench(await api.runScore()); } catch (e: any) { setError(`Benchmark failed: ${e.message}`); }
+    setBenchBusy(false);
+  }, []);
+  useEffect(() => { runBench(); }, [runBench]);
+
+  const verifyCert = async (forge: boolean) => {
+    if (!cert) return;
+    let c: Cert = cert, note = "";
+    if (forge) {
+      if (cert.verdict === "FLAGGED") { c = { ...cert, integrity_score: 100, verdict: "TRUSTED", canary_hits: [], jitter_flag: false }; note = `edited: score ${cert.integrity_score} -> 100, verdict FLAGGED -> TRUSTED`; }
+      else { c = { ...cert, red_commit: "0".repeat(64) }; note = "edited: Red's commitment swapped"; }
+    }
+    try { setVerif({ ...(await api.verifyCert(c)), forged: forge, note }); } catch (e: any) { setError(String(e.message || e)); }
+  };
+
   const apply = (st: Step) => {
     setTimeline((t) => [...t, st]);
     switch (st.type) {
@@ -74,9 +96,9 @@ export default function Page() {
 
   const run = async () => {
     setError(""); setRunning(true);
-    setTimeline([]); setVerdicts([]); setCert(null); setHits(null); setActive([]);
+    setTimeline([]); setVerdicts([]); setCert(null); setHits(null); setActive([]); setVerif(null);
     try {
-      const { steps } = await api.run(leak);
+      const { steps } = await api.run(leak, noisy);
       for (const st of steps) { await sleep(650); apply(st); refreshAudit(); }
       await sleep(900); setActive([]);
     } catch (e: any) { setError(`Could not run session: ${e.message}`); }
@@ -92,7 +114,7 @@ export default function Page() {
   return (
     <main className="mx-auto max-w-7xl space-y-5 px-5 py-8">
       <Header online={online} verify={verify} />
-      <Controls running={running} leak={leak} setLeak={setLeak} tampered={tampered} error={error}
+      <Controls running={running} leak={leak} setLeak={setLeak} noisy={noisy} setNoisy={setNoisy} tampered={tampered} error={error}
         onRun={run} onVerify={refreshAudit}
         onTamper={guard(api.tamper)} onRestore={guard(api.restore)} />
       <FlowDiagram active={active} />
@@ -100,10 +122,11 @@ export default function Page() {
         <div className="lg:col-span-1"><Timeline steps={timeline} running={running} /></div>
         <div className="space-y-5 lg:col-span-2">
           <VerdictFeed rows={verdicts} />
-          <div className="grid gap-5 md:grid-cols-2"><CertCard cert={cert} /><CanaryPanel hits={hits} /></div>
+          <div className="grid gap-5 md:grid-cols-2"><CertCard cert={cert} verif={verif} onVerify={verifyCert} /><CanaryPanel hits={hits} /></div>
         </div>
       </div>
       <ChainView rows={rows} verify={verify} />
+      <DefensePanel b={bench} onRun={runBench} busy={benchBusy} />
       <TimingPanel t={timing} onRun={guard(async () => { startedTiming.current = true; setTiming(await api.startTiming()); })} />
       <ResidualRisk />
       <footer className="pb-6 text-center text-xs text-slate-600">Bayora Blind Arena · Hack in Hills &apos;26 · Track 04</footer>

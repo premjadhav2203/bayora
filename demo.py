@@ -5,6 +5,8 @@ from bayora.audit import AuditChain, verify_chain
 from bayora.blue_runner import run_blue
 from bayora.canary import scan
 from bayora.models import MockModel
+from bayora.certs import verify_cert
+from bayora.scoring import evaluate
 from attacks.timing_attack import measure, leak_bits, leak_bits_upper, BUCKET_MS
 
 G, R, Y, B, X = "\033[92m", "\033[91m", "\033[93m", "\033[1m", "\033[0m"
@@ -78,6 +80,15 @@ sidB, ctxB = bootstrap(arena, [ATTACKS[0]], BLUE)
 arena.prompt(sidB, ctxB["payloads"][0])
 check(arena.sessions[sidB].cross_hits == 0, "Session B got no cache hit from Session A (per-session salt)")
 
+step("7b. Resource interference: a noisy neighbour skews timing (simulated CPU hog)")
+nm = MockModel(); nm.interference_ms = 600
+na = Arena(nm, AuditChain(os.path.join(d, "a3.db"), os.path.join(d, "k3.pem")))
+nsid, nctx = bootstrap(na, [ATTACKS[0], ATTACKS[3], "Explain how photosynthesis works"], BLUE)
+for p in nctx["payloads"]:
+    na.prompt(nsid, p)
+ncert = na.end(nsid, nctx["red_salt"], nctx["payloads"], nctx["blue_salt"])
+check(ncert["jitter_flag"], f"jitter detected (latency CV {ncert['latency_cv']}, {ncert['bucket_overflows']} bucket overflows) -> score {ncert['integrity_score']}, {ncert['verdict']}")
+
 step("8. Signed Test-Integrity Certificates")
 def show(c):
     print(json.dumps({k: c[k] for k in ("session_id", "red_reveal_ok", "blue_reveal_ok", "chain_ok",
@@ -90,3 +101,19 @@ arena.leaky_debug = False
 certB = arena.end(sidB, ctxB["red_salt"], ctxB["payloads"], ctxB["blue_salt"])
 print(f"{Y}Session B (clean){X}"); show(certB)
 check(certB["verdict"] == "TRUSTED", "clean session gets a TRUSTED signed certificate")
+
+step("8b. Offline certificate verification (needs only the cert + the trusted public key)")
+trusted = audit.public_key_hex()
+r = verify_cert(certB, trusted, audit.db_path)
+check(r["valid"], "genuine certificate verifies: signature OK, trusted key, chain head found in log")
+forged = dict(certA); forged["integrity_score"] = 100; forged["verdict"] = "TRUSTED"
+r2 = verify_cert(forged, trusted, audit.db_path)
+check(not r2["valid"], f"forged certificate (score edited 50 -> 100) REJECTED: {r2['reasons'][0]}")
+
+step("9. Defense benchmark: how GOOD is each Blue defense? (40-prompt public corpus)")
+for name, path in [("Baseline keyword filter", "bayora/defense_sample.py"), ("Hardened normalizing filter", "bayora/defense_hardened.py")]:
+    e = evaluate(open(path).read())
+    cats = "  ".join(f"{c[:6]} {v['caught']}/{v['total']}" for c, v in e["per_category"].items())
+    print(f"  {name:28s} detection {e['detection_rate']:5.1%}  false-positives {e['false_positive_rate']:5.1%}  F1 {e['f1']:.2f}")
+    print(f"      {cats}   missed: {[m['id'] for m in e['missed']]}")
+print(f"  {Y}Note: the hardened filter was written with this corpus in view, so its score is optimistic. Use a held-out set for real claims.{X}")

@@ -1,5 +1,5 @@
 """Core logic: sessions, auth, commit-reveal, sealed Blue, timing normalizer, canaries, certificate."""
-import hashlib, json, secrets, time
+import hashlib, json, secrets, statistics, time
 from dataclasses import dataclass, field
 from .audit import AuditChain, verify_chain
 from .blue_runner import run_blue
@@ -30,6 +30,8 @@ class Session:
     responses: list = field(default_factory=list)     # what Red could see
     verdicts: list = field(default_factory=list)      # what Blue could see
     cross_hits: int = 0
+    obs_ms: list = field(default_factory=list)        # latency Red actually observed (after padding)
+    overflows: int = 0                                # responses slower than the timing bucket
 
 
 class Arena:
@@ -103,8 +105,10 @@ class Arena:
         # timing normalizer: pad total handling time up to the next fixed bucket
         if self.quantize_ms:
             el = (time.perf_counter() - t0) * 1000
+            s.overflows += el >= self.quantize_ms      # bucket too small: padding can no longer hide this
             target = (int(el // self.quantize_ms) + 1) * self.quantize_ms
             time.sleep(max(target - el, 0) / 1000)
+        s.obs_ms.append((time.perf_counter() - t0) * 1000)
         s.responses.append(resp)
         return {"verdict": v["verdict"], "score": v["score"], "response": resp}
 
@@ -160,12 +164,15 @@ class Arena:
         self.model.flush(sid)
         self.audit.append(sid, "SESSION_END")
         chain_ok, bad, n = verify_chain(self.audit.db_path, self.audit.pub_path)
+        cv = (statistics.pstdev(s.obs_ms) / statistics.mean(s.obs_ms)) if len(s.obs_ms) >= 3 else 0.0
+        jitter_flag = s.overflows > 0 or cv > 0.15          # resource interference leaked into timing
         score = max(0, 100 - 50 * len(hits) - 40 * (not chain_ok) - 40 * (not red_ok)
-                    - 40 * (not blue_ok) - 30 * min(s.cross_hits, 1))
+                    - 40 * (not blue_ok) - 30 * min(s.cross_hits, 1) - 15 * jitter_flag)
         cert = {"session_id": sid, "red_commit": s.red_commit, "blue_commit": s.blue_commit,
                 "red_reveal_ok": red_ok, "blue_reveal_ok": blue_ok, "chain_ok": chain_ok,
                 "chain_head": self.audit.head(), "canary_hits": hits,
-                "cross_session_cache_hits": s.cross_hits, "integrity_score": score,
+                "cross_session_cache_hits": s.cross_hits, "latency_cv": round(cv, 3),
+                "bucket_overflows": s.overflows, "jitter_flag": jitter_flag, "integrity_score": score,
                 "verdict": "TRUSTED" if score >= 90 else "FLAGGED"}
         body = json.dumps(cert, sort_keys=True)
         cert["signature"], cert["pubkey"] = self.audit.sign(body.encode()), self.audit.public_key_hex()
